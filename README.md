@@ -33,6 +33,9 @@ python dispatch.py run --repo D:/proj --task-file task.md --backend dsh --name f
 python dispatch.py batch --repo D:/proj --file tasks.txt --concurrency 2
 python dispatch.py batch --repo D:/proj --file tasks.txt --dry-run   # 只看计划与成本预估
 
+python dispatch.py prune --repo D:/proj         # 预览已合并工作区的清理计划
+python dispatch.py prune --repo D:/proj --force # 执行工作区与分支清理
+
 python dispatch.py list                        # 历史运行
 python dispatch.py show <runId>                # 单次运行的完整报告
 ```
@@ -92,6 +95,14 @@ git worktree remove .worktrees/<name>
 ```
 
 注意：`git diff HEAD wb/<name>` 看不到内容——分支指针未移动，改动是工作区状态而非提交。这是刻意设计。
+
+### 清理隔离工作区
+
+`prune --repo <repo>` 扫描 `<repo>/.worktrees/` 下的 Git 工作区，只列出分支形如
+`wb/<name>`、工作区干净且分支已合并到该仓库当前 `HEAD` 的清理对象。
+有未提交改动（包括暂存和未跟踪文件）、尚未合并或已锁定的工作区会跳过并提示原因。
+加 `--force` 后依次执行 `git worktree remove` 与 `git branch -d`；`--force`
+仅启用执行，仍保留上述检查，Git 删除操作也保留默认的保护机制。
 
 ## 踩坑记录
 

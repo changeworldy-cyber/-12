@@ -465,6 +465,83 @@ def cmd_batch(args) -> int:
     return 0 if summary["failed"] == 0 else 1
 
 
+def cmd_prune(args) -> int:
+    repo = Path(args.repo).resolve()
+    worktrees_root = repo / ".worktrees"
+    code, listing = git(repo, "worktree", "list", "--porcelain", "-z")
+    if code != 0:
+        print(f"读取 worktree 列表失败：{listing.strip()}")
+        return 1
+
+    if not args.force:
+        print("[dry-run] 仅列出清理计划，使用 --force 执行清理。")
+
+    result = 0
+    for record in listing.split("\0\0"):
+        fields = {}
+        for entry in record.split("\0"):
+            field_name, _separator, field_value = entry.partition(" ")
+            fields[field_name] = field_value
+        if not fields.get("worktree"):
+            continue
+
+        worktree = Path(fields["worktree"]).resolve()
+        try:
+            relative_path = worktree.relative_to(worktrees_root)
+        except ValueError:
+            continue
+        if not relative_path.parts:
+            continue
+
+        branch_ref = fields.get("branch", "")
+        if not branch_ref.startswith("refs/heads/wb/"):
+            print(f"跳过 {worktree}：分支不是 wb/<name>。")
+            continue
+        branch = branch_ref[len("refs/heads/"):]
+
+        status_code, status, status_error = run_cmd(
+            ["git", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"],
+            worktree, child_env(None), 120,
+        )[:3]
+        if status_code != 0:
+            print(f"跳过 {branch} ({worktree})：读取工作区状态失败："
+                  f"{(status_error or status).decode('utf-8', 'replace').strip()}")
+            result = 1
+            continue
+        if status.strip():
+            print(f"跳过 {branch} ({worktree})：有未提交改动。")
+            continue
+        if "locked" in fields:
+            print(f"跳过 {branch} ({worktree})：工作区已锁定。")
+            continue
+
+        code, output = git(repo, "merge-base", "--is-ancestor", branch_ref, "HEAD")
+        if code == 1:
+            print(f"跳过 {branch} ({worktree})：分支尚未合并到当前 HEAD。")
+            continue
+        if code != 0:
+            print(f"跳过 {branch} ({worktree})：检查合并状态失败：{output.strip()}")
+            result = 1
+            continue
+
+        if not args.force:
+            print(f"[dry-run] 将清理 {worktree}  [分支 {branch}]")
+            continue
+
+        code, output = git(repo, "worktree", "remove", str(worktree))
+        if code != 0:
+            print(f"清理 {branch} ({worktree}) 失败：{output.strip()}")
+            result = 1
+            continue
+        code, output = git(repo, "branch", "-d", branch)
+        if code != 0:
+            print(f"工作区已移除，删除分支 {branch} 失败：{output.strip()}")
+            result = 1
+            continue
+        print(f"已清理 {worktree}  [分支 {branch}]")
+    return result
+
+
 def write_report(run_dir: Path, rep: Report) -> None:
     (run_dir / "report.json").write_text(
         json.dumps(asdict(rep), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -612,6 +689,11 @@ def main() -> int:
     b.add_argument("--dry-run", action="store_true", help="只打印执行计划与成本预估")
     b.add_argument("--json", action="store_true", help="额外输出批次汇总 JSON")
     b.set_defaults(func=cmd_batch, isolate=True, session_id=None)
+
+    prune = sub.add_parser("prune", help="清理已合并且无未提交改动的隔离工作区（默认 dry-run）")
+    prune.add_argument("--repo", required=True, help="目标 git 仓库根目录")
+    prune.add_argument("--force", action="store_true", help="执行工作区与分支清理；默认只列出计划")
+    prune.set_defaults(func=cmd_prune)
 
     s = sub.add_parser("show", help="查看单次运行的完整报告")
     s.add_argument("run_id")
