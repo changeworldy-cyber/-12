@@ -1,0 +1,18 @@
+[project]
+name = "wb-dispatch"
+version = "0.1.0"
+description = "由 WorkBuddy 指挥 Codex / DeepSeek Harness 执行编码任务的调度层"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+wb-dispatch = "dispatch:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 系统临时目录在受限环境下可能不可写，测试产物落在项目内
+addopts = "--basetemp=.pytest-tmp"
