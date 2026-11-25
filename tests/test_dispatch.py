@@ -2,7 +2,6 @@
 
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -127,15 +126,8 @@ def test_prepare_worktree_rejects_non_git(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="需要 git")
-def test_prepare_worktree_isolation_creates_branch(tmp_path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    (repo / "a.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
-        cwd=repo, check=True)
+def test_prepare_worktree_isolation_creates_branch(git_repo):
+    repo = git_repo
 
     opts = SimpleNamespace(isolate=True, name="fix-a")
     wt, branch, cleanup = dispatch.prepare_worktree(repo, opts, "fix-a")

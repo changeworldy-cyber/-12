@@ -14,5 +14,3 @@ wb-dispatch = "dispatch:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# 系统临时目录在受限环境下可能不可写，测试产物落在项目内
-addopts = "--basetemp=.pytest-tmp"

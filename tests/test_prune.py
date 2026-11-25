@@ -1,6 +1,5 @@
 """prune 的 Git 工作区集成测试与失败路径测试。"""
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -17,21 +16,6 @@ def run_git(repo, *arguments):
         text=True, encoding="utf-8", env=dispatch.child_env(None),
     )
     return completed.stdout
-
-
-@pytest.fixture
-def git_repo(tmp_path):
-    if shutil.which("git") is None:
-        pytest.skip("需要 git")
-    repo = tmp_path / "repo with spaces-清理"
-    repo.mkdir()
-    run_git(repo, "init", "-q")
-    run_git(repo, "config", "user.email", "t@t")
-    run_git(repo, "config", "user.name", "t")
-    (repo / "tracked.txt").write_text("initial\n", encoding="utf-8")
-    run_git(repo, "add", "-A")
-    run_git(repo, "commit", "-qm", "initial")
-    return repo
 
 
 def create_worktree(repo, name="task", branch=None):

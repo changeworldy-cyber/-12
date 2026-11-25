@@ -123,6 +123,15 @@ Windows (Git Bash) 上开发与验证，Python ≥ 3.9。核心逻辑不依赖�
 python -m pytest -q
 ```
 
+测试临时目录默认位于 pytest 项目根目录下的 `.pytest-tmp/`，使用短编号子目录，
+与启动 pytest 的当前目录及系统临时目录无关。可用 `--basetemp <目录>` 显式覆盖。
+真实 Git 仓库由共享 fixture 创建，保留空格和中文路径覆盖；Windows 下仅为这些
+测试仓库启用 `core.longpaths=true`，系统 Git 配置保持原样。
+
+若 checkout 路径仍超出 Windows 支持范围，只有实际触发 `WinError 206` 或 Git
+`Filename too long` 的临时目录用例才会显式跳过；`python -m pytest -q -rs` 显示原因。
+其他异常及断言失败继续报告失败。
+
 ## 许可
 
 MIT
