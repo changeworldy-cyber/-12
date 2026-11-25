@@ -16,6 +16,7 @@ def pytest_configure(config):
     # 残留的 Git 对象文件带只读属性，Windows 下 rmtree 会因 WinError 5 失败。
     if config.option.basetemp is None:
         base = Path(config.rootpath) / ".pytest-tmp" / f"run-{os.getpid()}"
+        base.parent.mkdir(parents=True, exist_ok=True)
         config.option.basetemp = str(base)
 
 
