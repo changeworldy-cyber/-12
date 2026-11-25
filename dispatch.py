@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -465,9 +466,65 @@ def cmd_batch(args) -> int:
     return 0 if summary["failed"] == 0 else 1
 
 
+def prune_worktree_path(repo: Path, path: Path) -> Path:
+    worktrees_root = repo / ".worktrees"
+    resolved_root = worktrees_root.resolve()
+    if resolved_root != worktrees_root:
+        raise ValueError(f"路径越界：{worktrees_root} 指向 {resolved_root}。")
+
+    worktree = path.resolve()
+    try:
+        relative_path = worktree.relative_to(worktrees_root)
+    except ValueError:
+        raise ValueError(f"路径越界：{path} 指向 {worktree}；仅允许清理 {worktrees_root} 下的路径。") from None
+    if not relative_path.parts:
+        raise ValueError(f"路径越界：清理目标须为 {worktrees_root} 的子目录。")
+    return worktree
+
+
+def remove_prune_worktree(repo: Path, worktree: Path) -> tuple[int, str]:
+    for flags in ((), ("--force",)):
+        target = prune_worktree_path(repo, worktree)
+        code, output = git(repo, "worktree", "remove", *flags, str(target))
+        if code == 0:
+            return code, output
+        if not flags:
+            print(f"普通移除 {target} 失败：{output.strip()}\n"
+                  "重试 git worktree remove --force。")
+    return code, output
+
+
+def print_prune_cleanup_hint(repo: Path, worktree: Path, branch: str) -> None:
+    worktree = prune_worktree_path(repo, worktree)
+    quote = shlex.quote
+    if sys.platform == "win32":
+        quote = lambda value: "'" + value.replace("'", "''") + "'"
+    repo_arg = quote(str(repo))
+    worktree_arg = quote(str(worktree))
+    print(f"请手工清理残留目录：{worktree}（包括 {worktree / '.pytest-tmp'} 等只读残留）。")
+    if sys.platform == "win32":
+        print("PowerShell:")
+        print(f"  Remove-Item -LiteralPath {worktree_arg} -Recurse -Force")
+    else:
+        print(f"  chmod -R u+w -- {worktree_arg}")
+        print(f"  rm -rf -- {worktree_arg}")
+    print("目录清理后，若工作区仍登记在 Git 中，执行：")
+    print(f"  git -C {repo_arg} worktree remove --force {worktree_arg}")
+    print("最后删除已合并分支：")
+    print(f"  git -C {repo_arg} branch -d -- {quote(branch)}")
+
+
 def cmd_prune(args) -> int:
     repo = Path(args.repo).resolve()
     worktrees_root = repo / ".worktrees"
+    try:
+        resolved_root = worktrees_root.resolve()
+    except (OSError, RuntimeError) as exc:
+        print(f"拒绝清理：检查清理范围 {worktrees_root} 失败：{exc}")
+        return 1
+    if resolved_root != worktrees_root:
+        print(f"拒绝清理：路径越界，{worktrees_root} 指向 {resolved_root}。")
+        return 1
     code, listing = git(repo, "worktree", "list", "--porcelain", "-z")
     if code != 0:
         print(f"读取 worktree 列表失败：{listing.strip()}")
@@ -485,12 +542,16 @@ def cmd_prune(args) -> int:
         if not fields.get("worktree"):
             continue
 
-        worktree = Path(fields["worktree"]).resolve()
+        listed_worktree = Path(fields["worktree"])
         try:
-            relative_path = worktree.relative_to(worktrees_root)
+            listed_worktree.relative_to(worktrees_root)
         except ValueError:
             continue
-        if not relative_path.parts:
+        try:
+            worktree = prune_worktree_path(repo, listed_worktree)
+        except (ValueError, OSError, RuntimeError) as exc:
+            print(f"拒绝清理 {listed_worktree}：{exc}")
+            result = 1
             continue
 
         branch_ref = fields.get("branch", "")
@@ -528,9 +589,15 @@ def cmd_prune(args) -> int:
             print(f"[dry-run] 将清理 {worktree}  [分支 {branch}]")
             continue
 
-        code, output = git(repo, "worktree", "remove", str(worktree))
-        if code != 0:
-            print(f"清理 {branch} ({worktree}) 失败：{output.strip()}")
+        try:
+            code, output = remove_prune_worktree(repo, worktree)
+            if code != 0:
+                print(f"--force 重试后清理 {branch} ({worktree}) 失败：{output.strip()}")
+                print_prune_cleanup_hint(repo, worktree, branch)
+                result = 1
+                continue
+        except (ValueError, OSError, RuntimeError) as exc:
+            print(f"拒绝清理 {branch} ({worktree})：{exc}")
             result = 1
             continue
         code, output = git(repo, "branch", "-d", branch)
