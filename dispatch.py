@@ -486,8 +486,8 @@ def remove_prune_worktree(repo: Path, worktree: Path) -> tuple[int, str]:
     for flags in ((), ("--force",)):
         target = prune_worktree_path(repo, worktree)
         code, output = git(repo, "worktree", "remove", *flags, str(target))
-        if code == 0:
-            return code, output
+        if code == 0 or "not a working tree" in output.lower():
+            return 0, output
         if not flags:
             print(f"普通移除 {target} 失败：{output.strip()}\n"
                   "重试 git worktree remove --force。")

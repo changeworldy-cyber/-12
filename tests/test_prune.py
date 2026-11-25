@@ -318,6 +318,44 @@ def test_prune_retries_readonly_remnants_with_force(git_repo, monkeypatch, capsy
     assert not run_git(git_repo, "branch", "--list", "wb/task").strip()
 
 
+@pytest.mark.parametrize("retry_error", ["not a working tree", "NOT A WORKING TREE"])
+def test_prune_deletes_branch_after_worktree_is_unregistered(git_repo, monkeypatch, capsys, retry_error):
+    worktree = create_worktree(git_repo)
+    remnant = worktree / ".pytest-tmp" / "leftover"
+    original_git = dispatch.git
+    remove_commands = []
+
+    def unregistered_git(repo, *arguments):
+        if arguments[:2] == ("worktree", "remove"):
+            remove_commands.append(arguments)
+            code, output = original_git(repo, *arguments)
+            if "--force" not in arguments:
+                assert code == 0
+                remnant.parent.mkdir(parents=True)
+                remnant.write_text("leftover\n", encoding="utf-8")
+                return 1, f"failed to delete {worktree}: Directory not empty"
+            assert code != 0
+            assert "not a working tree" in output.lower()
+            return code, f"fatal: '{worktree}' is {retry_error}"
+        return original_git(repo, *arguments)
+
+    monkeypatch.setattr(dispatch, "git", unregistered_git)
+    monkeypatch.setattr(sys, "argv", ["dispatch.py", "prune", "--repo", str(git_repo), "--force"])
+    assert dispatch.main() == 0
+
+    output = capsys.readouterr().out
+    assert "Directory not empty" in output
+    assert "重试 git worktree remove --force" in output
+    assert "已清理" in output
+    assert remove_commands == [
+        ("worktree", "remove", str(worktree)),
+        ("worktree", "remove", "--force", str(worktree)),
+    ]
+    assert remnant.is_file()
+    assert not run_git(git_repo, "branch", "--list", "wb/task").strip()
+    assert worktree.as_posix() not in run_git(git_repo, "worktree", "list", "--porcelain", "-z")
+
+
 def test_prune_reports_manual_cleanup_after_force_retry_failure(git_repo, monkeypatch, capsys):
     branch = "wb/task'quoted"
     worktree = create_worktree(git_repo, name="task'quoted", branch=branch)
